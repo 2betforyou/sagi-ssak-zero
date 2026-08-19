@@ -1,0 +1,149 @@
+{
+  "version": "0.1",
+  "description": "사기싹제로 위험도 스코어링 규칙. LLM은 이 파일의 signal_id에 맞는 근거(evidence)만 추출하고, 실제 점수 계산은 이 config를 읽는 결정론적 엔진이 수행한다.",
+
+  "score_range": { "min": 0, "max": 100 },
+
+  "risk_levels": [
+    { "level": "LOW",      "min": 0,  "max": 20 },
+    { "level": "GUARDED",  "min": 21, "max": 40 },
+    { "level": "CAUTION",  "min": 41, "max": 60 },
+    { "level": "HIGH",     "min": 61, "max": 80 },
+    { "level": "CRITICAL", "min": 81, "max": 100 }
+  ],
+
+  "confidence_by_source": {
+    "official_api": 1.0,
+    "platform_listed_info": 0.8,
+    "web_search_cited": 0.55,
+    "llm_inference_uncited": 0.3
+  },
+
+  "_comment_scoring": "raw = sum(base_weight * confidence) over all present signals; hard_gates는 이 계산을 건너뛰고 min_score를 강제한다.",
+
+  "hard_gates": [
+    {
+      "id": "confirmed_fraud_report_match",
+      "label_ko": "피해신고 DB 확정 매칭",
+      "description": "판매자의 계좌번호/전화번호/사업자등록번호가 기존 피해신고(더치트 등) DB와 동일 식별자로 확정 매칭됨",
+      "required_source": "official_api",
+      "min_score": 90
+    },
+    {
+      "id": "business_registration_invalid",
+      "label_ko": "사업자등록 무효/말소",
+      "description": "국세청 사업자등록정보 진위확인 API 조회 결과 등록번호가 존재하지 않거나 말소 상태",
+      "required_source": "official_api",
+      "min_score": 90
+    }
+  ],
+
+  "weighted_signals": [
+    {
+      "id": "identity_mismatch",
+      "category": "identity",
+      "label_ko": "판매자 표시명 - 실제 사업자 불일치",
+      "base_weight": 30,
+      "allowed_sources": ["official_api", "platform_listed_info"],
+      "mvp": true
+    },
+    {
+      "id": "registered_address_implausible",
+      "category": "identity",
+      "label_ko": "등록 사업장 주소가 주거용 건물(빌라/아파트 등)로 추정되거나 사업 규모에 비해 부적절",
+      "base_weight": 15,
+      "allowed_sources": ["platform_listed_info", "official_api"],
+      "mvp": true,
+      "note": "MVP는 주소 문자열 패턴(빌라/연립/다세대/아파트+호수 등)으로만 판별. 건축물대장 API 등으로 실제 건물 용도를 확인하면 official_api로 격상 가능"
+    },
+    {
+      "id": "official_brand_relation_unclear",
+      "category": "identity",
+      "label_ko": "공식 브랜드/법인과의 관계 확인 불가",
+      "base_weight": 20,
+      "allowed_sources": ["web_search_cited", "platform_listed_info"],
+      "mvp": true
+    },
+    {
+      "id": "price_anomaly_unexplained",
+      "category": "price",
+      "label_ko": "시장가 대비 이상 저가 (합리적 사유 미확인)",
+      "base_weight": 10,
+      "severity_tiers": [
+        { "deviation_pct_below_median": 15, "weight_multiplier": 0.6 },
+        { "deviation_pct_below_median": 25, "weight_multiplier": 1.0 },
+        { "deviation_pct_below_median": 40, "weight_multiplier": 1.5 }
+      ],
+      "allowed_sources": ["web_search_cited"],
+      "mvp": true,
+      "note": "가격 차이에 대한 LLM의 합리적 설명(해외판 SKU 등)이 확인되면 이 signal은 미적용 처리"
+    },
+    {
+      "id": "business_very_new",
+      "category": "business_history",
+      "label_ko": "사업자등록 30일 이내 신규",
+      "base_weight": 10,
+      "allowed_sources": ["official_api"],
+      "mvp": true
+    },
+    {
+      "id": "low_external_footprint",
+      "category": "business_history",
+      "label_ko": "외부 판매/활동 이력 거의 없음",
+      "base_weight": 5,
+      "allowed_sources": ["web_search_cited"],
+      "mvp": true
+    },
+    {
+      "id": "external_fraud_mentions",
+      "category": "external_intel",
+      "label_ko": "커뮤니티/뉴스 등 의심 사례 언급 (미확정)",
+      "base_weight": 25,
+      "allowed_sources": ["web_search_cited"],
+      "mvp": true,
+      "note": "identifier 확정 매칭이 아닌 정황적 언급만 해당 (확정 매칭은 hard_gate 처리)"
+    },
+    {
+      "id": "off_platform_payment_request",
+      "category": "transaction",
+      "label_ko": "플랫폼 외부 결제/계좌이체 유도 정황",
+      "base_weight": 25,
+      "allowed_sources": ["platform_listed_info", "web_search_cited"],
+      "mvp": true
+    },
+    {
+      "id": "platform_payment_protection_used",
+      "category": "transaction",
+      "label_ko": "플랫폼 자체 보호 결제 수단 사용",
+      "base_weight": -10,
+      "allowed_sources": ["platform_listed_info"],
+      "mvp": true
+    },
+    {
+      "id": "long_verified_seller_history",
+      "category": "business_history",
+      "label_ko": "장기간 판매 이력 확인",
+      "base_weight": -15,
+      "allowed_sources": ["platform_listed_info", "web_search_cited"],
+      "mvp": true
+    },
+    {
+      "id": "verified_official_distributor",
+      "category": "identity",
+      "label_ko": "공식 유통/판매점 관계 확인됨",
+      "base_weight": -30,
+      "allowed_sources": ["official_api", "web_search_cited"],
+      "mvp": false,
+      "note": "제조사 공식 유통점 명단 등 신뢰 가능한 소스 확보 전까지 비활성"
+    },
+    {
+      "id": "temporal_risk_spike",
+      "category": "temporal",
+      "label_ko": "최근 위험 신호 급증 패턴",
+      "base_weight": 15,
+      "allowed_sources": ["official_api"],
+      "mvp": false,
+      "note": "시계열 크롤링 필요 — Phase 2"
+    }
+  ]
+}
