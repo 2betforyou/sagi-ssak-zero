@@ -37,8 +37,19 @@ class SellerListing:
     external_search_performed: bool = False
 
 
+# 법인 형태 표기나 "공식/스토어" 같은 상용구는 두 이름이 같은 사업 주체를
+# 가리켜도 문자열 비교에서 어긋나게 만든다 (예: "롯데하이마트 공식스토어" vs
+# "주식회사 롯데하이마트"). 오프라인 폴백에서 흔한 false positive를 줄이기
+# 위해 비교 전에 제거한다. 완벽하지 않으니 ANTHROPIC_API_KEY가 있으면
+# 이 휴리스틱 대신 LLM 판단을 우선 사용한다(check_identity_mismatch 참고).
+_NAME_BOILERPLATE = ["주식회사", "유한회사", "합자회사", "(주)", "㈜", "공식", "스토어", "샵"]
+
+
 def _normalize(s: str) -> str:
-    return re.sub(r"[^0-9a-zA-Z가-힣]", "", s or "").lower()
+    s = re.sub(r"[^0-9a-zA-Z가-힣]", "", s or "").lower()
+    for token in _NAME_BOILERPLATE:
+        s = s.replace(token.lower(), "")
+    return s
 
 
 # ---------------------------------------------------------------- identity --
